@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
@@ -38,6 +39,18 @@ public class GlobalExceptionHandler {
             errors.putIfAbsent(fieldError.getField(), fieldError.getDefaultMessage());
         }
         problem.setProperty("errors", errors);
+        return problem;
+    }
+
+    /**
+     * Ulæselig/misdannet request body (fx ugyldig JSON eller null i et
+     * primitivt felt) -> 400. En klientfejl må aldrig blive til en 500.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ProblemDetail handleUnreadableBody(HttpMessageNotReadableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Request body is missing or malformed.");
+        problem.setTitle("Malformed request body");
         return problem;
     }
 

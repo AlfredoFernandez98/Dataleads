@@ -47,6 +47,9 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
+                        // TEMP: lock down in the auth phase (ADR-0003) — der findes
+                        // ingen brugere endnu, så lead-API'et er åbent indtil login lander.
+                        .requestMatchers("/api/v1/leads/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         .anyRequest().authenticated())
                 // API-adfærd: uautentificerede kald får 401 JSON — aldrig et redirect

@@ -1,2 +1,5 @@
+# Baseline: normalise line endings to LF (specific rules below override).
+* text=auto eol=lf
+
 /mvnw text eol=lf
 *.cmd text eol=crlf

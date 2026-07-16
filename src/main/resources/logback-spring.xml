@@ -2,7 +2,7 @@
 <!--
   Profile-aware logging.
   - dev:            pretty console output, DEBUG for our own package.
-  - staging/prod:   compact console output at INFO (container-friendly; ship stdout to your log stack).
+  - staging/prod:   structured (ECS JSON) console output at INFO (container-friendly; ship stdout to your log stack).
 -->
 <configuration>
 
@@ -20,10 +20,18 @@
         <logger name="dk.dataleads" level="DEBUG"/>
     </springProfile>
 
-    <!-- Staging & production: INFO, plain output to stdout. -->
+    <!-- Staging & production: INFO, structured (ECS JSON) output to stdout.
+         Format comes from 'logging.structured.format.console' (set in
+         application-staging/prod.properties), defaulting to ecs. -->
     <springProfile name="staging,prod">
+        <springProperty name="STRUCTURED_FORMAT" source="logging.structured.format.console" defaultValue="ecs"/>
+        <appender name="STRUCTURED_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+                <format>${STRUCTURED_FORMAT}</format>
+            </encoder>
+        </appender>
         <root level="INFO">
-            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="STRUCTURED_CONSOLE"/>
         </root>
         <logger name="dk.dataleads" level="INFO"/>
     </springProfile>

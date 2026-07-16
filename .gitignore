@@ -37,3 +37,8 @@ build/
 *.env
 !.env.example
 .DS_Store
+
+### Local-only: AI rules & docs (not pushed) ###
+.claude/
+CLAUDE.md
+docs/

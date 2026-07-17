@@ -1,9 +1,12 @@
 package dk.dataleads.service;
 
+import dk.dataleads.cvr.CvrClient;
+import dk.dataleads.cvr.CvrCompany;
 import dk.dataleads.domain.Lead;
 import dk.dataleads.domain.LeadActivity;
 import dk.dataleads.domain.LeadStatus;
 import dk.dataleads.dto.CreateLeadRequest;
+import dk.dataleads.dto.LeadResponse;
 import dk.dataleads.dto.UpdateLeadStatusRequest;
 import dk.dataleads.repository.LeadActivityRepository;
 import dk.dataleads.repository.LeadRepository;
@@ -28,10 +31,13 @@ public class LeadService {
 
     private final LeadRepository leadRepository;
     private final LeadActivityRepository leadActivityRepository;
+    private final CvrClient cvrClient;
 
-    public LeadService(LeadRepository leadRepository, LeadActivityRepository leadActivityRepository) {
+    public LeadService(LeadRepository leadRepository, LeadActivityRepository leadActivityRepository,
+                       CvrClient cvrClient) {
         this.leadRepository = leadRepository;
         this.leadActivityRepository = leadActivityRepository;
+        this.cvrClient = cvrClient;
     }
 
     /**
@@ -77,6 +83,47 @@ public class LeadService {
         leadActivityRepository.save(
                 LeadActivity.statusChange(saved, oldStatus, request.status(), request.note()));
         return saved;
+    }
+
+    /**
+     * Opretter et lead direkte fra et CVR-opslag (ADR-0002). Firmadata
+     * (navn/adresse/branche/reklamebeskyttelse) kommer fra registret, og
+     * cvr_synced_at sættes til nu, så 30-dages-friskhedspolitikken kan
+     * håndhæves. Dublet -> 409, ukendt CVR -> 404 (kilde-nedbrud bliver
+     * 502 inde i CvrClient).
+     */
+    @Transactional
+    public LeadResponse importFromCvr(String cvr) {
+        if (leadRepository.existsByCvrAndDeletedAtIsNull(cvr)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A lead with CVR %s already exists".formatted(cvr));
+        }
+        CvrCompany company = cvrClient.lookup(cvr)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "No company with CVR %s found in the CVR registry".formatted(cvr)));
+        Lead lead = new Lead(cvr, company.name(), company.fullAddress(),
+                company.industryCode(), company.reklamebeskyttet());
+        lead.setCvrSyncedAt(Instant.now());
+        return LeadResponse.from(leadRepository.save(lead));
+    }
+
+    /**
+     * Genopfrisker et eksisterende leads firmadata fra CVR (30-dages
+     * refresh-politikken, ADR-0002). Leadets status/aktiviteter røres ikke —
+     * kun registerfelterne og cvr_synced_at.
+     */
+    @Transactional
+    public LeadResponse refreshFromCvr(Long id) {
+        Lead lead = get(id);
+        CvrCompany company = cvrClient.lookup(lead.getCvr())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "CVR %s no longer exists in the CVR registry".formatted(lead.getCvr())));
+        lead.setName(company.name());
+        lead.setAddress(company.fullAddress());
+        lead.setIndustryCode(company.industryCode());
+        lead.setReklamebeskyttet(company.reklamebeskyttet());
+        lead.setCvrSyncedAt(Instant.now());
+        return LeadResponse.from(leadRepository.save(lead));
     }
 
     /**

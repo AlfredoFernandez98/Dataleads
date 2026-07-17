@@ -1,5 +1,6 @@
 package dk.dataleads.controller;
 
+import dk.dataleads.cvr.CvrNumber;
 import dk.dataleads.domain.Lead;
 import dk.dataleads.domain.LeadStatus;
 import dk.dataleads.dto.CreateLeadRequest;
@@ -47,6 +48,27 @@ public class LeadController {
                 .buildAndExpand(lead.getId())
                 .toUri();
         return ResponseEntity.created(location).body(LeadResponse.from(lead));
+    }
+
+    /**
+     * Importerer et lead direkte fra CVR-registret (ADR-0002): 201 + Location,
+     * 400 ved ugyldigt CVR-format, 404 ved ukendt CVR, 409 ved dublet.
+     */
+    @PostMapping("/from-cvr/{cvr}")
+    public ResponseEntity<LeadResponse> importFromCvr(@PathVariable String cvr) {
+        CvrNumber.requireValid(cvr);
+        LeadResponse response = leadService.importFromCvr(cvr);
+        URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/api/v1/leads/{id}")
+                .buildAndExpand(response.id())
+                .toUri();
+        return ResponseEntity.created(location).body(response);
+    }
+
+    /** Genopfrisker registerfelterne fra CVR (30-dages friskhedspolitik, ADR-0002). */
+    @PostMapping("/{id}/refresh-cvr")
+    public LeadResponse refreshFromCvr(@PathVariable Long id) {
+        return leadService.refreshFromCvr(id);
     }
 
     /** Pagineret liste (?page=&size=&sort=), valgfrit filtreret på ?status=. */

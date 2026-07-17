@@ -3,6 +3,7 @@ package dk.dataleads.controller;
 import dk.dataleads.config.SecurityConfig;
 import dk.dataleads.domain.Lead;
 import dk.dataleads.dto.CreateLeadRequest;
+import dk.dataleads.dto.LeadResponse;
 import dk.dataleads.service.LeadService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,5 +95,23 @@ class LeadControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.detail").value("Lead 99 not found"));
+    }
+
+    @Test
+    void importFromCvrReturns201WithLocation() throws Exception {
+        when(leadService.importFromCvr("12345678")).thenReturn(LeadResponse.from(leadWithId(7L)));
+
+        mockMvc.perform(post("/api/v1/leads/from-cvr/12345678"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", org.hamcrest.Matchers.endsWith("/api/v1/leads/7")))
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.cvr").value("12345678"));
+    }
+
+    @Test
+    void importFromCvrWithInvalidCvrReturns400ProblemDetail() throws Exception {
+        mockMvc.perform(post("/api/v1/leads/from-cvr/12AB"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("CVR must be exactly 8 digits"));
     }
 }

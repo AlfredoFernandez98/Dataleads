@@ -1,10 +1,13 @@
 package dk.dataleads.service;
 
+import dk.dataleads.cvr.CvrClient;
+import dk.dataleads.cvr.CvrCompany;
 import dk.dataleads.domain.Lead;
 import dk.dataleads.domain.LeadActivity;
 import dk.dataleads.domain.LeadActivityType;
 import dk.dataleads.domain.LeadStatus;
 import dk.dataleads.dto.CreateLeadRequest;
+import dk.dataleads.dto.LeadResponse;
 import dk.dataleads.dto.UpdateLeadStatusRequest;
 import dk.dataleads.repository.LeadActivityRepository;
 import dk.dataleads.repository.LeadRepository;
@@ -39,11 +42,19 @@ class LeadServiceTest {
     @Mock
     private LeadActivityRepository leadActivityRepository;
 
+    @Mock
+    private CvrClient cvrClient;
+
     @InjectMocks
     private LeadService leadService;
 
     private static Lead sampleLead() {
         return new Lead("12345678", "Testfirma ApS", "Testvej 1, 8000 Aarhus C", "620100", false);
+    }
+
+    private static CvrCompany sampleCompany() {
+        return new CvrCompany("12345678", "Testfirma ApS", "Testvej 1",
+                "8000", "Aarhus C", "620100", true);
     }
 
     @Test
@@ -125,5 +136,53 @@ class LeadServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void importFromCvrRejectsDuplicateWith409AndNeverCallsRegistry() {
+        when(leadRepository.existsByCvrAndDeletedAtIsNull("12345678")).thenReturn(true);
+
+        assertThatThrownBy(() -> leadService.importFromCvr("12345678"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        verify(cvrClient, never()).lookup(any());
+        verify(leadRepository, never()).save(any());
+    }
+
+    @Test
+    void importFromCvrThrows404WhenCompanyNotInRegistry() {
+        when(leadRepository.existsByCvrAndDeletedAtIsNull("12345678")).thenReturn(false);
+        when(cvrClient.lookup("12345678")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> leadService.importFromCvr("12345678"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        verify(leadRepository, never()).save(any());
+    }
+
+    @Test
+    void importFromCvrCreatesLeadFromRegistryDataWithStatusNewAndSyncTimestamp() {
+        when(leadRepository.existsByCvrAndDeletedAtIsNull("12345678")).thenReturn(false);
+        when(cvrClient.lookup("12345678")).thenReturn(Optional.of(sampleCompany()));
+        when(leadRepository.save(any(Lead.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        LeadResponse response = leadService.importFromCvr("12345678");
+
+        assertThat(response.cvr()).isEqualTo("12345678");
+
+        ArgumentCaptor<Lead> captor = ArgumentCaptor.forClass(Lead.class);
+        verify(leadRepository).save(captor.capture());
+        Lead saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(LeadStatus.NEW);
+        assertThat(saved.getName()).isEqualTo("Testfirma ApS");
+        // fullAddress() samler adresse + postnr + by fra CVR-opslaget.
+        assertThat(saved.getAddress()).isEqualTo("Testvej 1, 8000 Aarhus C");
+        assertThat(saved.getIndustryCode()).isEqualTo("620100");
+        assertThat(saved.isReklamebeskyttet()).isTrue();
+        assertThat(saved.getCvrSyncedAt()).isNotNull();
     }
 }

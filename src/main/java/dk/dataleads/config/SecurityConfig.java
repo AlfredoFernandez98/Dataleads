@@ -7,13 +7,17 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -37,23 +41,20 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // TODO(ADR-0003): når login/session-endpoints kommer, slå CSRF til med
-                // CookieCsrfTokenRepository.withHttpOnlyFalse(), så SPA'en kan læse
-                // XSRF-TOKEN-cookien og sende X-XSRF-TOKEN-headeren. Lige nu findes der
-                // ingen browser-session-endpoints (kun åbne GET-health-endpoints), så
-                // CSRF er deaktiveret som det simpleste korrekte valg.
-                .csrf(csrf -> csrf.disable())
+                // CSRF slået til med en cookie-baseret token (ADR-0003): SPA'en læser
+                // XSRF-TOKEN-cookien (withHttpOnlyFalse) og sender den tilbage som
+                // X-XSRF-TOKEN-header på muterende kald. Session-cookie-auth kræver dette.
+                .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 // CORS-reglerne kommer fra corsConfigurationSource()-beanen nedenfor.
                 .cors(Customizer.withDefaults())
+                // Session oprettes efter behov (ved login) — det er bæreren af auth.
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
-                        // TEMP: lock down in the auth phase (ADR-0003) — der findes
-                        // ingen brugere endnu, så lead-API'et er åbent indtil login lander.
-                        .requestMatchers("/api/v1/leads/**").permitAll()
-                        // TEMP: lock down in the auth phase (ADR-0003) — CVR-opslag
-                        // er åbne indtil login lander, ligesom lead-API'et ovenfor.
-                        .requestMatchers("/api/v1/cvr/**").permitAll()
+                        // Åbne auth-endpoints: opret bruger + login. Resten kræver session.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                        // Alt andet — inkl. /api/v1/leads/** og /api/v1/cvr/** — kræver login.
                         .anyRequest().authenticated())
                 // API-adfærd: uautentificerede kald får 401 JSON — aldrig et redirect
                 // til en login-side. Derfor er formLogin/httpBasic også slået fra.
@@ -98,10 +99,18 @@ public class SecurityConfig {
     }
 
     /**
-     * BCrypt jf. ADR-0003 — klar til auth-fasen (User.password_hash).
+     * BCrypt jf. ADR-0003. Sammen med AppUserDetailsService-beanen får Spring
+     * Boot auto-konfigureret en DaoAuthenticationProvider, som login bruger.
      */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /** Eksponerer AuthenticationManager, så AuthController kan autentificere login. */
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration)
+            throws Exception {
+        return configuration.getAuthenticationManager();
     }
 }

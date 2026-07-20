@@ -5,20 +5,26 @@ import dk.dataleads.domain.Lead;
 import dk.dataleads.dto.CreateLeadRequest;
 import dk.dataleads.dto.LeadResponse;
 import dk.dataleads.service.LeadService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.server.ResponseStatusException;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -34,10 +40,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(LeadController.class)
 @Import(SecurityConfig.class)
+@WithMockUser
 class LeadControllerTest {
 
     @Autowired
+    private WebApplicationContext context;
+
     private MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        // Boot 4's @WebMvcTest-slice anvender ikke springSecurity() automatisk,
+        // så vi bygger MockMvc med security-filtrene (og @WithMockUser-broen) selv.
+        mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+    }
 
     @MockitoBean
     private LeadService leadService;
@@ -52,7 +68,7 @@ class LeadControllerTest {
     void createReturns201WithLocationAndBody() throws Exception {
         when(leadService.create(any(CreateLeadRequest.class))).thenReturn(leadWithId(7L));
 
-        mockMvc.perform(post("/api/v1/leads")
+        mockMvc.perform(post("/api/v1/leads").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cvr":"12345678","name":"Testfirma ApS",
@@ -67,7 +83,7 @@ class LeadControllerTest {
 
     @Test
     void createWithBlankCvrReturns400ProblemDetail() throws Exception {
-        mockMvc.perform(post("/api/v1/leads")
+        mockMvc.perform(post("/api/v1/leads").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cvr":"","name":"Testfirma ApS","reklamebeskyttet":false}"""))
@@ -78,7 +94,7 @@ class LeadControllerTest {
 
     @Test
     void createWithInvalidCvrFormatReturns400ProblemDetail() throws Exception {
-        mockMvc.perform(post("/api/v1/leads")
+        mockMvc.perform(post("/api/v1/leads").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"cvr":"12AB","name":"Testfirma ApS","reklamebeskyttet":false}"""))
@@ -101,7 +117,7 @@ class LeadControllerTest {
     void importFromCvrReturns201WithLocation() throws Exception {
         when(leadService.importFromCvr("12345678")).thenReturn(LeadResponse.from(leadWithId(7L)));
 
-        mockMvc.perform(post("/api/v1/leads/from-cvr/12345678"))
+        mockMvc.perform(post("/api/v1/leads/from-cvr/12345678").with(csrf()))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.endsWith("/api/v1/leads/7")))
                 .andExpect(jsonPath("$.id").value(7))
@@ -110,7 +126,7 @@ class LeadControllerTest {
 
     @Test
     void importFromCvrWithInvalidCvrReturns400ProblemDetail() throws Exception {
-        mockMvc.perform(post("/api/v1/leads/from-cvr/12AB"))
+        mockMvc.perform(post("/api/v1/leads/from-cvr/12AB").with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("CVR must be exactly 8 digits"));
     }
